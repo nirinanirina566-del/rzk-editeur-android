@@ -4,6 +4,8 @@ package com.rzk.editeur
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,11 +36,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun RZKEditorApp() {
     val context = LocalContext.current
+
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var token by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Prêt") }
     var resultUrl by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+
+    val mainHandler = remember {
+        Handler(Looper.getMainLooper())
+    }
 
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -59,7 +66,11 @@ fun RZKEditorApp() {
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("RZK EDITEUR", style = MaterialTheme.typography.headlineLarge)
+            Text(
+                "RZK EDITEUR",
+                style = MaterialTheme.typography.headlineLarge
+            )
+
             Text("MASTER QUALITY • 4K • AUTO COLOR")
 
             Button(
@@ -85,9 +96,11 @@ fun RZKEditorApp() {
             Button(
                 onClick = {
                     val uri = imageUri
+                    val accessToken = token
+
                     if (uri == null) {
                         status = "Choisissez d'abord une photo"
-                    } else if (token.isBlank()) {
+                    } else if (accessToken.isBlank()) {
                         status = "Entrez votre APP ACCESS TOKEN"
                     } else {
                         loading = true
@@ -96,7 +109,8 @@ fun RZKEditorApp() {
                         Thread {
                             try {
                                 val bytes = context.contentResolver
-                                    .openInputStream(uri)!!.use { it.readBytes() }
+                                    .openInputStream(uri)!!
+                                    .use { it.readBytes() }
 
                                 val body = MultipartBody.Builder()
                                     .setType(MultipartBody.FORM)
@@ -111,15 +125,21 @@ fun RZKEditorApp() {
 
                                 val request = Request.Builder()
                                     .url("$backend/enhance")
-                                    .addHeader("Authorization", "Bearer $token")
+                                    .addHeader(
+                                        "Authorization",
+                                        "Bearer $accessToken"
+                                    )
                                     .post(body)
                                     .build()
 
                                 val response = client.newCall(request).execute()
-                                val responseText = response.body?.string() ?: ""
+                                val responseText =
+                                    response.body?.string() ?: ""
 
                                 if (!response.isSuccessful) {
-                                    throw IOException("Erreur serveur: ${response.code} $responseText")
+                                    throw IOException(
+                                        "Erreur serveur: ${response.code} $responseText"
+                                    )
                                 }
 
                                 val json = JSONObject(responseText)
@@ -129,10 +149,12 @@ fun RZKEditorApp() {
                                 )
 
                                 if (processId.isBlank()) {
-                                    throw IOException("Identifiant de traitement introuvable: $responseText")
+                                    throw IOException(
+                                        "Identifiant de traitement introuvable: $responseText"
+                                    )
                                 }
 
-                                runOnUiThread {
+                                mainHandler.post {
                                     status = "Traitement en cours..."
                                 }
 
@@ -143,17 +165,23 @@ fun RZKEditorApp() {
 
                                     val statusRequest = Request.Builder()
                                         .url("$backend/status/$processId")
-                                        .addHeader("Authorization", "Bearer $token")
+                                        .addHeader(
+                                            "Authorization",
+                                            "Bearer $accessToken"
+                                        )
                                         .get()
                                         .build()
 
                                     val statusResponse =
                                         client.newCall(statusRequest).execute()
+
                                     val statusText =
                                         statusResponse.body?.string() ?: ""
 
                                     if (!statusResponse.isSuccessful) {
-                                        throw IOException("Erreur status: ${statusResponse.code}")
+                                        throw IOException(
+                                            "Erreur status: ${statusResponse.code}"
+                                        )
                                     }
 
                                     val statusJson = JSONObject(statusText)
@@ -161,30 +189,40 @@ fun RZKEditorApp() {
                                         .optString("status")
                                         .lowercase()
 
-                                    runOnUiThread {
+                                    mainHandler.post {
                                         status = "Traitement : $currentStatus"
                                     }
 
                                     if (currentStatus in listOf(
-                                            "completed", "complete", "success", "succeeded"
+                                            "completed",
+                                            "complete",
+                                            "success",
+                                            "succeeded"
                                         )
                                     ) {
                                         val resultRequest = Request.Builder()
                                             .url("$backend/result/$processId")
-                                            .addHeader("Authorization", "Bearer $token")
+                                            .addHeader(
+                                                "Authorization",
+                                                "Bearer $accessToken"
+                                            )
                                             .get()
                                             .build()
 
                                         val resultResponse =
                                             client.newCall(resultRequest).execute()
+
                                         val resultText =
                                             resultResponse.body?.string() ?: ""
 
                                         if (!resultResponse.isSuccessful) {
-                                            throw IOException("Erreur résultat: ${resultResponse.code}")
+                                            throw IOException(
+                                                "Erreur résultat: ${resultResponse.code}"
+                                            )
                                         }
 
                                         val resultJson = JSONObject(resultText)
+
                                         val url = resultJson.optString(
                                             "url",
                                             resultJson.optString(
@@ -193,7 +231,7 @@ fun RZKEditorApp() {
                                             )
                                         )
 
-                                        runOnUiThread {
+                                        mainHandler.post {
                                             resultUrl = url
                                             status = if (url.isNotBlank()) {
                                                 "Sary vita! Afaka sokafana ny vokatra."
@@ -208,19 +246,25 @@ fun RZKEditorApp() {
                                     }
 
                                     if (currentStatus in listOf(
-                                            "failed", "error", "canceled"
+                                            "failed",
+                                            "error",
+                                            "canceled"
                                         )
                                     ) {
-                                        throw IOException("Tsy nahomby ny traitement: $statusText")
+                                        throw IOException(
+                                            "Tsy nahomby ny traitement: $statusText"
+                                        )
                                     }
                                 }
 
                                 if (!finished) {
-                                    throw IOException("Nihoatra ny fotoana fiandrasana.")
+                                    throw IOException(
+                                        "Nihoatra ny fotoana fiandrasana."
+                                    )
                                 }
 
                             } catch (e: Exception) {
-                                runOnUiThread {
+                                mainHandler.post {
                                     status = "Erreur : ${e.message}"
                                     loading = false
                                 }
@@ -231,7 +275,10 @@ fun RZKEditorApp() {
                 enabled = !loading,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (loading) "Traitement en cours..." else "AMÉLIORER LA PHOTO")
+                Text(
+                    if (loading) "Traitement en cours..."
+                    else "AMÉLIORER LA PHOTO"
+                )
             }
 
             Text("État : $status")
@@ -253,3 +300,4 @@ fun RZKEditorApp() {
         }
     }
 }
+
